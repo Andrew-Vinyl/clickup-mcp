@@ -12,13 +12,24 @@ import express from 'express';
 import { ClickUpAPI } from './clickup-api.js';
 import { registerAllTools } from './tools/index.js';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables with error handling
+try {
+  dotenv.config();
+} catch (error) {
+  console.log('⚠️  dotenv config failed, using process.env directly');
+}
 
+// Environment variables with Railway defaults
 const CLICKUP_TOKEN = process.env.CLICKUP_PERSONAL_TOKEN || '';
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
-const SERVER_MODE = process.env.SERVER_MODE || 'stdio';
+const SERVER_MODE = process.env.SERVER_MODE || process.env.NODE_ENV === 'production' ? 'http' : 'stdio';
 const PORT = parseInt(process.env.PORT || '3000');
+
+console.log('🔧 Environment Configuration:');
+console.log(`   SERVER_MODE: ${SERVER_MODE}`);
+console.log(`   PORT: ${PORT}`);
+console.log(`   CLICKUP_TOKEN: ${CLICKUP_TOKEN ? 'SET ✅' : 'MISSING ❌'}`);
+console.log(`   NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
 
 // Extended server interface to handle our custom properties
 interface ExtendedServer extends Server {
@@ -26,14 +37,9 @@ interface ExtendedServer extends Server {
   toolHandlers?: Map<string, (args: any) => Promise<any>>;
 }
 
-if (!CLICKUP_TOKEN) {
-  console.error('❌ CLICKUP_PERSONAL_TOKEN is required');
-  process.exit(1);
-}
-
 class ClickUpMCPServer {
   private server: ExtendedServer;
-  private clickup: ClickUpAPI;
+  private clickup: ClickUpAPI | null = null;
 
   constructor() {
     this.server = new Server(
@@ -48,7 +54,18 @@ class ClickUpMCPServer {
       }
     ) as ExtendedServer;
 
-    this.clickup = new ClickUpAPI(CLICKUP_TOKEN, LOG_LEVEL as any);
+    // Initialize ClickUp API only if token is available
+    if (CLICKUP_TOKEN) {
+      try {
+        this.clickup = new ClickUpAPI(CLICKUP_TOKEN, LOG_LEVEL as any);
+        console.log('✅ ClickUp API initialized');
+      } catch (error) {
+        console.error('❌ ClickUp API initialization failed:', error);
+      }
+    } else {
+      console.log('⚠️  ClickUp token not provided - running in demo mode');
+    }
+
     this.setupHandlers();
   }
 
@@ -57,8 +74,26 @@ class ClickUpMCPServer {
     this.server.tools = new Map();
     this.server.toolHandlers = new Map();
 
-    // Register all available tools
-    registerAllTools(this.server, this.clickup);
+    // Register tools only if ClickUp API is available
+    if (this.clickup) {
+      try {
+        registerAllTools(this.server, this.clickup);
+        console.log(`✅ Registered ${this.server.tools.size} tools`);
+      } catch (error) {
+        console.error('❌ Tool registration failed:', error);
+      }
+    } else {
+      // Add a demo tool for health checks
+      this.server.tools.set('demo_ping', {
+        name: 'demo_ping',
+        description: 'Demo ping tool - ClickUp token required for full functionality',
+        inputSchema: { type: 'object', properties: {}, required: [] }
+      });
+      this.server.toolHandlers.set('demo_ping', async () => ({
+        success: true,
+        message: 'Demo mode - Add CLICKUP_PERSONAL_TOKEN for full functionality'
+      }));
+    }
 
     // List tools handler
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -102,19 +137,61 @@ class ClickUpMCPServer {
 
   async startHttp() {
     console.log('🚀 Starting ClickUp MCP Server in HTTP mode...');
+    console.log(`🔌 Binding to port ${PORT}...`);
     
     const app = express();
-    app.use(express.json());
+    
+    // Basic middleware
+    app.use(express.json({ limit: '10mb' }));
+    app.use((req, res, next) => {
+      console.log(`📨 ${req.method} ${req.path}`);
+      next();
+    });
 
-    // Health check endpoint
+    // Health check endpoint (Railway requirement)
     app.get('/health', (req, res) => {
+      try {
+        const healthData = {
+          status: 'healthy',
+          service: 'clickup-mcp',
+          version: '1.0.0',
+          timestamp: new Date().toISOString(),
+          tools: this.server.tools?.size || 0,
+          mode: SERVER_MODE,
+          clickup_connected: !!this.clickup,
+          environment: {
+            node_env: process.env.NODE_ENV,
+            port: PORT,
+            has_token: !!CLICKUP_TOKEN
+          }
+        };
+        
+        console.log('✅ Health check successful');
+        res.status(200).json(healthData);
+      } catch (error) {
+        console.error('❌ Health check failed:', error);
+        res.status(500).json({ 
+          status: 'error', 
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    });
+
+    // Root endpoint
+    app.get('/', (req, res) => {
       res.json({ 
-        status: 'healthy', 
-        service: 'clickup-mcp',
+        message: 'ClickUp MCP Server is running',
+        health: '/health',
         version: '1.0.0',
-        timestamp: new Date().toISOString(),
         tools: this.server.tools?.size || 0
       });
+    });
+
+    // Tools endpoint for debugging
+    app.get('/tools', (req, res) => {
+      const toolsMap = this.server.tools || new Map();
+      const tools = Array.from(toolsMap.keys());
+      res.json({ tools, count: tools.length });
     });
 
     // MCP endpoint (for future HTTP transport support)
@@ -122,39 +199,78 @@ class ClickUpMCPServer {
       res.json({ message: 'MCP HTTP endpoint ready for future implementation' });
     });
 
-    app.listen(PORT, () => {
-      console.log(`✅ ClickUp MCP Server running on port ${PORT}`);
-      console.log(`🔍 Health check: http://localhost:${PORT}/health`);
-      console.log(`🔧 Registered ${this.server.tools?.size || 0} tools`);
+    // Error handling middleware
+    app.use((error: any, req: any, res: any, next: any) => {
+      console.error('🚨 Express error:', error);
+      res.status(500).json({ error: 'Internal server error' });
     });
+
+    // Start server with error handling
+    try {
+      const server = app.listen(PORT, '0.0.0.0', () => {
+        console.log(`✅ ClickUp MCP Server running on port ${PORT}`);
+        console.log(`🔍 Health check: http://localhost:${PORT}/health`);
+        console.log(`🔧 Registered ${this.server.tools?.size || 0} tools`);
+        console.log(`🌐 Server ready for Railway deployment`);
+      });
+
+      // Handle server errors
+      server.on('error', (error: any) => {
+        console.error('🚨 Server error:', error);
+        if (error.code === 'EADDRINUSE') {
+          console.error(`💥 Port ${PORT} is already in use`);
+          process.exit(1);
+        }
+      });
+
+      // Graceful shutdown
+      process.on('SIGTERM', () => {
+        console.log('👋 Received SIGTERM, shutting down gracefully');
+        server.close(() => {
+          console.log('✅ Server closed');
+          process.exit(0);
+        });
+      });
+
+    } catch (error) {
+      console.error('💥 Failed to start HTTP server:', error);
+      process.exit(1);
+    }
   }
 }
 
-// Main execution
+// Main execution with comprehensive error handling
 async function main() {
-  const server = new ClickUpMCPServer();
+  try {
+    console.log('🔥 ClickUp MCP Server Starting...');
+    console.log('==========================================');
+    
+    const server = new ClickUpMCPServer();
 
-  if (SERVER_MODE === 'http') {
-    await server.startHttp();
-  } else {
-    await server.startStdio();
+    if (SERVER_MODE === 'http' || process.env.NODE_ENV === 'production') {
+      await server.startHttp();
+    } else {
+      await server.startStdio();
+    }
+  } catch (error) {
+    console.error('💥 Fatal error during startup:', error);
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+    process.exit(1);
   }
 }
 
-// Handle shutdown gracefully
-process.on('SIGINT', () => {
-  console.log('\n👋 Shutting down ClickUp MCP Server...');
-  process.exit(0);
+// Handle unhandled rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🚨 Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
 });
 
-process.on('SIGTERM', () => {
-  console.log('\n👋 Shutting down ClickUp MCP Server...');
-  process.exit(0);
+process.on('uncaughtException', (error) => {
+  console.error('🚨 Uncaught Exception:', error);
+  process.exit(1);
 });
 
+// Startup
 if (require.main === module) {
-  main().catch((error) => {
-    console.error('💥 Failed to start server:', error);
-    process.exit(1);
-  });
+  main();
 }
