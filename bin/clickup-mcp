@@ -1,0 +1,22 @@
+#!/usr/bin/env node
+
+const { spawn } = require('child_process');
+const path = require('path');
+
+// Add the bin directory
+const binPath = path.join(__dirname, '..', 'dist', 'index.js');
+
+// Execute the main server
+const child = spawn('node', [binPath], {
+  stdio: 'inherit',
+  env: { ...process.env, SERVER_MODE: 'stdio' }
+});
+
+child.on('error', (error) => {
+  console.error('Failed to start ClickUp MCP server:', error);
+  process.exit(1);
+});
+
+child.on('close', (code) => {
+  process.exit(code || 0);
+});
