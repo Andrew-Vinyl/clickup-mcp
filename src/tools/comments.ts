@@ -1,8 +1,15 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { ClickUpAPI } from '../clickup-api.js';
 import { registerTool } from './index.js';
 
-export function registerCommentTools(server: Server, clickup: ClickUpAPI): void {
+// Extended server interface
+interface ExtendedServer extends Server {
+  tools?: Map<string, Tool>;
+  toolHandlers?: Map<string, (args: any) => Promise<any>>;
+}
+
+export function registerCommentTools(server: ExtendedServer, clickup: ClickUpAPI): void {
   registerTool(
     server,
     'clickup_get_task_comments',

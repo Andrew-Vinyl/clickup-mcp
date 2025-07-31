@@ -5,6 +5,7 @@ import {
   ErrorCode,
   ListToolsRequestSchema,
   McpError,
+  Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
 import express from 'express';
@@ -14,10 +15,16 @@ import { registerAllTools } from './tools/index.js';
 // Load environment variables
 dotenv.config();
 
-const CLICKUP_TOKEN = process.env.CLICKUP_PERSONAL_TOKEN;
+const CLICKUP_TOKEN = process.env.CLICKUP_PERSONAL_TOKEN || '';
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
 const SERVER_MODE = process.env.SERVER_MODE || 'stdio';
 const PORT = parseInt(process.env.PORT || '3000');
+
+// Extended server interface to handle our custom properties
+interface ExtendedServer extends Server {
+  tools?: Map<string, Tool>;
+  toolHandlers?: Map<string, (args: any) => Promise<any>>;
+}
 
 if (!CLICKUP_TOKEN) {
   console.error('❌ CLICKUP_PERSONAL_TOKEN is required');
@@ -25,7 +32,7 @@ if (!CLICKUP_TOKEN) {
 }
 
 class ClickUpMCPServer {
-  private server: Server;
+  private server: ExtendedServer;
   private clickup: ClickUpAPI;
 
   constructor() {
@@ -39,19 +46,23 @@ class ClickUpMCPServer {
           tools: {},
         },
       }
-    );
+    ) as ExtendedServer;
 
     this.clickup = new ClickUpAPI(CLICKUP_TOKEN, LOG_LEVEL as any);
     this.setupHandlers();
   }
 
   private setupHandlers() {
+    // Initialize custom properties
+    this.server.tools = new Map();
+    this.server.toolHandlers = new Map();
+
     // Register all available tools
     registerAllTools(this.server, this.clickup);
 
     // List tools handler
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      const toolsMap = this.server['tools'] || new Map();
+      const toolsMap = this.server.tools || new Map();
       const tools = Array.from(toolsMap.entries()).map(([name, tool]) => ({
         name,
         description: tool.description,
@@ -66,7 +77,7 @@ class ClickUpMCPServer {
       const { name, arguments: args } = request.params;
       
       try {
-        const toolHandlers = this.server['toolHandlers'] || new Map();
+        const toolHandlers = this.server.toolHandlers || new Map();
         const handler = toolHandlers.get(name);
         
         if (!handler) {
@@ -101,7 +112,8 @@ class ClickUpMCPServer {
         status: 'healthy', 
         service: 'clickup-mcp',
         version: '1.0.0',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        tools: this.server.tools?.size || 0
       });
     });
 
@@ -113,6 +125,7 @@ class ClickUpMCPServer {
     app.listen(PORT, () => {
       console.log(`✅ ClickUp MCP Server running on port ${PORT}`);
       console.log(`🔍 Health check: http://localhost:${PORT}/health`);
+      console.log(`🔧 Registered ${this.server.tools?.size || 0} tools`);
     });
   }
 }
