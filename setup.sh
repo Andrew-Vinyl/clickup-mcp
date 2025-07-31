@@ -14,8 +14,8 @@ if [ ! -f "package.json" ] || [ ! -f "src/index.ts" ]; then
     exit 1
 fi
 
-# Install dependencies
-echo "📦 Installing dependencies..."
+# Install dependencies and generate lockfile
+echo "📦 Installing dependencies and generating lockfile..."
 npm install
 
 # Copy environment template

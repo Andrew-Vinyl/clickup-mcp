@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "prestart": "npm run build",
+    "railway:build": "npm install && npm run build",
     "test": "npm run build && node test/deployment-test.js",
     "test:quick": "node test/deployment-test.js"
   },
