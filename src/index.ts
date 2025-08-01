@@ -9,8 +9,12 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
 import express from 'express';
+import { fileURLToPath } from 'url';
 import { ClickUpAPI } from './clickup-api.js';
 import { registerAllTools } from './tools/index.js';
+
+// ES Module helpers
+const __filename = fileURLToPath(import.meta.url);
 
 // Load environment variables with error handling
 try {
@@ -270,7 +274,7 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
-// Startup
-if (require.main === module) {
+// ES Module startup check - replaces require.main === module
+if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
