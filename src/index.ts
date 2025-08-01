@@ -241,63 +241,69 @@ class ClickUpMCPServer {
       res.json({ message: 'MCP HTTP endpoint ready for future implementation' });
     });
 
-    // Dedicated SSE endpoint
-    app.get('/sse', (req, res) => {
-      console.log('🌊 Dedicated SSE endpoint accessed');
+    // MCP Stream endpoint for SSE (mcp-remote protocol)
+    app.get('/mcp/stream', (req, res) => {
+      console.log('🌊 MCP Stream endpoint accessed for SSE');
+      console.log(`   User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
+      console.log(`   Accept: ${req.headers.accept || 'unknown'}`);
       
-      // Set SSE headers
+      // Set proper SSE headers
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control',
-        'X-Accel-Buffering': 'no'
+        'Access-Control-Allow-Headers': 'Cache-Control, Accept, Authorization',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'X-Accel-Buffering': 'no', // Disable nginx buffering
+        'Pragma': 'no-cache',
+        'Expires': '0'
       });
 
-      // Send server info
-      res.write('event: server-info\n');
-      res.write(`data: ${JSON.stringify({
-        type: 'server-info',
-        name: 'clickup-mcp',
-        version: '1.0.0',
-        tools: this.server.tools?.size || 0,
-        timestamp: new Date().toISOString()
-      })}\n\n`);
+      // Send initial connection confirmation
+      res.write(': MCP Stream connected\n\n');
+      console.log('✅ MCP SSE stream established');
 
-      // Send available tools
-      if (this.server.tools && this.server.tools.size > 0) {
-        const toolsList = Array.from(this.server.tools.keys());
-        res.write('event: tools-available\n');
-        res.write(`data: ${JSON.stringify({
-          type: 'tools-available',
-          tools: toolsList,
-          count: toolsList.length
-        })}\n\n`);
-      }
-
-      console.log('✅ SSE dedicated connection established');
-
-      // Heartbeat
-      const heartbeatInterval = setInterval(() => {
+      // Send keep-alive ping every 10 seconds
+      const keepAliveInterval = setInterval(() => {
         try {
-          res.write('event: ping\n');
-          res.write(`data: {"timestamp":"${new Date().toISOString()}"}\n\n`);
+          res.write(': ping\n\n');
+          console.log('💓 MCP SSE keep-alive sent');
         } catch (error) {
-          clearInterval(heartbeatInterval);
+          console.log('❌ MCP SSE keep-alive failed, cleaning up');
+          clearInterval(keepAliveInterval);
         }
-      }, 25000);
+      }, 10000);
 
-      // Cleanup handlers
+      // Handle client disconnect
       req.on('close', () => {
-        console.log('👋 SSE dedicated client disconnected');
-        clearInterval(heartbeatInterval);
+        console.log('👋 MCP SSE client disconnected');
+        clearInterval(keepAliveInterval);
       });
 
       req.on('error', (error) => {
-        console.error('🚨 SSE dedicated connection error:', error);
-        clearInterval(heartbeatInterval);
+        console.error('🚨 MCP SSE connection error:', error);
+        clearInterval(keepAliveInterval);
       });
+
+      // Handle response errors
+      res.on('error', (error) => {
+        console.error('🚨 MCP SSE response error:', error);
+        clearInterval(keepAliveInterval);
+      });
+
+      res.on('close', () => {
+        console.log('� MCP SSE connection closed by server');
+        clearInterval(keepAliveInterval);
+      });
+    });
+
+    // Handle OPTIONS for MCP stream endpoint
+    app.options('/mcp/stream', (req, res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cache-Control, Accept, Authorization');
+      res.status(200).end();
     });
 
     // Handle SSE preflight requests
