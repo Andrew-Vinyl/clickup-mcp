@@ -2,6 +2,7 @@
   "name": "clickup-mcp",
   "version": "1.0.0",
   "description": "ClickUp Model Context Protocol Server - Production Ready",
+  "type": "module",
   "main": "dist/index.js",
   "bin": {
     "clickup-mcp": "./bin/clickup-mcp"

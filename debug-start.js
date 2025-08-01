@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// 🚨 Emergency startup debug script
+// 🚨 Emergency startup debug script - ES Module version
 console.log('🔥 DEBUG: Starting ClickUp MCP Server debug mode...');
 console.log('Node version:', process.version);
 console.log('Platform:', process.platform);
@@ -8,8 +8,8 @@ console.log('Arch:', process.arch);
 console.log('CWD:', process.cwd());
 
 console.log('\n📁 Checking file structure...');
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
 
 try {
   const distExists = fs.existsSync('./dist');
@@ -30,7 +30,8 @@ try {
   console.log('CLICKUP_PERSONAL_TOKEN:', process.env.CLICKUP_PERSONAL_TOKEN ? 'SET' : 'MISSING');
   
   console.log('\n🚀 Attempting to load main module...');
-  require('./dist/index.js');
+  // Use dynamic import for ES modules
+  await import('./dist/index.js');
   
 } catch (error) {
   console.error('💥 CRITICAL ERROR:', error);
