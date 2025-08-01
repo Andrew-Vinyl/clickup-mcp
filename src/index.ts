@@ -227,17 +227,6 @@ class ClickUpMCPServer {
       }
     });
 
-    // Root endpoint
-    app.get('/', (req, res) => {
-      console.log('🏠 Root endpoint accessed');
-      res.json({ 
-        message: 'ClickUp MCP Server is running',
-        health: '/health',
-        version: '1.0.0',
-        tools: this.server.tools?.size || 0
-      });
-    });
-
     // Tools endpoint for debugging
     app.get('/tools', (req, res) => {
       console.log('🔧 Tools endpoint accessed');
@@ -250,6 +239,73 @@ class ClickUpMCPServer {
     app.post('/mcp', async (req, res) => {
       console.log('🔌 MCP endpoint accessed');
       res.json({ message: 'MCP HTTP endpoint ready for future implementation' });
+    });
+
+    // Dedicated SSE endpoint
+    app.get('/sse', (req, res) => {
+      console.log('🌊 Dedicated SSE endpoint accessed');
+      
+      // Set SSE headers
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control',
+        'X-Accel-Buffering': 'no'
+      });
+
+      // Send server info
+      res.write('event: server-info\n');
+      res.write(`data: ${JSON.stringify({
+        type: 'server-info',
+        name: 'clickup-mcp',
+        version: '1.0.0',
+        tools: this.server.tools?.size || 0,
+        timestamp: new Date().toISOString()
+      })}\n\n`);
+
+      // Send available tools
+      if (this.server.tools && this.server.tools.size > 0) {
+        const toolsList = Array.from(this.server.tools.keys());
+        res.write('event: tools-available\n');
+        res.write(`data: ${JSON.stringify({
+          type: 'tools-available',
+          tools: toolsList,
+          count: toolsList.length
+        })}\n\n`);
+      }
+
+      console.log('✅ SSE dedicated connection established');
+
+      // Heartbeat
+      const heartbeatInterval = setInterval(() => {
+        try {
+          res.write('event: ping\n');
+          res.write(`data: {"timestamp":"${new Date().toISOString()}"}\n\n`);
+        } catch (error) {
+          clearInterval(heartbeatInterval);
+        }
+      }, 25000);
+
+      // Cleanup handlers
+      req.on('close', () => {
+        console.log('👋 SSE dedicated client disconnected');
+        clearInterval(heartbeatInterval);
+      });
+
+      req.on('error', (error) => {
+        console.error('🚨 SSE dedicated connection error:', error);
+        clearInterval(heartbeatInterval);
+      });
+    });
+
+    // Handle SSE preflight requests
+    app.options('/', (req, res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cache-Control, Accept');
+      res.status(200).end();
     });
 
     // Error handling middleware
