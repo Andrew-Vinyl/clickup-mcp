@@ -1,4 +1,4 @@
-# Simple single-stage Dockerfile for Railway
+# Nuclear option - run as root for Railway
 FROM node:18-alpine
 
 # Set working directory
@@ -7,32 +7,29 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install ALL dependencies (dev + prod for building)
+# Install dependencies
 RUN npm install
 
-# Copy source code
+# Copy source code  
 COPY . .
 
 # Build TypeScript
 RUN npm run build
 
-# Remove dev dependencies
+# Clean up dev dependencies
 RUN npm prune --production
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001 && \
-    chown -R nodejs:nodejs /app
-
-# Switch to non-root user
-USER nodejs
+# Make sure our startup script is executable
+RUN chmod +x debug-start.js
 
 # Expose port
 EXPOSE 3000
 
-# Add basic health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
-
-# Start with more explicit command
-CMD ["node", "dist/index.js"]
+# Add some debug output and start
+CMD echo "🔥 Container starting..." && \
+    echo "Current user: $(whoami)" && \
+    echo "Working directory: $(pwd)" && \
+    echo "Files in /app:" && \
+    ls -la && \
+    echo "Starting debug script..." && \
+    node debug-start.js
