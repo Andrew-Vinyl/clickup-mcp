@@ -89,17 +89,6 @@ class ClickUpMCPServer {
     console.log('🛠️  Registering basic tools...');
     this.registerBasicTools();
 
-    // Register ClickUp tools if API is available
-    if (this.clickup) {
-      try {
-        console.log('🔌 Registering ClickUp tools...');
-        this.registerClickUpTools();
-        console.log(`✅ Registered ${this.server.tools.size} total tools`);
-      } catch (error) {
-        console.error('❌ ClickUp tool registration failed:', error);
-      }
-    }
-
     console.log('📋 Setting up request handlers...');
     this.setupRequestHandlers();
     console.log('✅ Request handlers setup complete');
@@ -146,12 +135,6 @@ class ClickUpMCPServer {
     }
 
     console.log(`📦 Registered ${this.server.tools!.size} basic tools`);
-  }
-
-  private registerClickUpTools() {
-    // For now, just register the essential tools to avoid hanging
-    // We can add more tools incrementally once the server is stable
-    console.log('🔌 ClickUp tools registration complete (basic set)');
   }
 
   private setupRequestHandlers() {
@@ -345,8 +328,9 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
-// ES Module startup check - replaces require.main === module
-if (import.meta.url === `file://${process.argv[1]}`) {
-  console.log('🚀 Starting as main module...');
-  main();
-}
+// FORCE STARTUP - Always run main() regardless of how this is called
+console.log('🚀 FORCE STARTING - Main execution beginning...');
+main().catch((error) => {
+  console.error('💥 CRITICAL STARTUP FAILURE:', error);
+  process.exit(1);
+});
