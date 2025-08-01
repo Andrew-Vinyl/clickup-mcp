@@ -1,35 +1,20 @@
-# Nuclear option - run as root for Railway
+# Force Railway to show startup logs
 FROM node:18-alpine
 
-# Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy and install
 COPY package*.json ./
-
-# Install dependencies
 RUN npm install
-
-# Copy source code  
 COPY . .
-
-# Build TypeScript
 RUN npm run build
-
-# Clean up dev dependencies
 RUN npm prune --production
 
-# Make sure our startup script is executable
+# Make executable
 RUN chmod +x debug-start.js
 
 # Expose port
 EXPOSE 3000
 
-# Add some debug output and start
-CMD echo "🔥 Container starting..." && \
-    echo "Current user: $(whoami)" && \
-    echo "Working directory: $(pwd)" && \
-    echo "Files in /app:" && \
-    ls -la && \
-    echo "Starting debug script..." && \
-    node debug-start.js
+# Force Railway to show our logs by using exec
+CMD ["sh", "-c", "echo '🔥 RAILWAY CONTAINER STARTING...' && echo 'Current time:' && date && echo 'Environment:' && env | grep -E '(NODE_ENV|CLICKUP|SERVER|PORT)' && echo 'Starting Node.js...' && exec node debug-start.js"]
