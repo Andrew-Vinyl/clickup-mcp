@@ -10,6 +10,7 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
+    "start:debug": "node debug-start.js",
     "prestart": "npm run build",
     "railway:build": "npm install && npm run build",
     "test": "npm run build && node test/deployment-test.js",

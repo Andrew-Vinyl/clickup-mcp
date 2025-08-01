@@ -1,5 +1,5 @@
-# Multi-stage build for optimal production image
-FROM node:18-alpine AS builder
+# Simple single-stage Dockerfile for Railway
+FROM node:18-alpine
 
 # Set working directory
 WORKDIR /app
@@ -7,7 +7,7 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install all dependencies (including dev deps for building)
+# Install ALL dependencies (dev + prod for building)
 RUN npm install
 
 # Copy source code
@@ -16,28 +16,13 @@ COPY . .
 # Build TypeScript
 RUN npm run build
 
-# Production stage
-FROM node:18-alpine AS production
-
-# Set working directory
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install only production dependencies
-RUN npm install --omit=dev && npm cache clean --force
-
-# Copy built application from builder stage
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/bin ./bin
+# Remove dev dependencies
+RUN npm prune --production
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-# Change ownership
-RUN chown -R nodejs:nodejs /app
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app
 
 # Switch to non-root user
 USER nodejs
@@ -45,9 +30,9 @@ USER nodejs
 # Expose port
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+# Add basic health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
 
-# Start the server
-CMD ["npm", "start"]
+# Start with more explicit command
+CMD ["node", "dist/index.js"]
