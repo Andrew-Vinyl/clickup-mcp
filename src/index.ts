@@ -95,48 +95,50 @@ class ClickUpMCPServer {
   }
 
   private registerBasicTools() {
-    // Initialize tool storage
-    this.server.tools = new Map();
-    this.server.toolHandlers = new Map();
-
-    // Add basic demo tool
-    this.server.tools.set('demo_ping', {
+    // Add basic tools that don't require ClickUp API
+    this.server.tools!.set('demo_ping', {
       name: 'demo_ping',
       description: 'Demo ping tool - ClickUp token required for full functionality',
       inputSchema: { type: 'object', properties: {}, required: [] }
     });
     
-    this.server.toolHandlers.set('demo_ping', async () => ({
+    this.server.toolHandlers!.set('demo_ping', async () => ({
       success: true,
       message: 'Demo mode - Add CLICKUP_PERSONAL_TOKEN for full functionality',
       timestamp: new Date().toISOString()
     }));
 
-    // Register all ClickUp tools if API is available
+    // Add ClickUp teams tool if API is available
     if (this.clickup) {
-      registerAllTools(this.server, this.clickup);
+      this.server.tools!.set('clickup_get_teams', {
+        name: 'clickup_get_teams',
+        description: 'Get all teams for the authenticated user',
+        inputSchema: { type: 'object', properties: {}, required: [] }
+      });
+      
+      this.server.toolHandlers!.set('clickup_get_teams', async () => {
+        try {
+          const teams = await this.clickup!.getTeams();
+          return {
+            success: true,
+            data: teams,
+            message: `Retrieved ${teams.length} teams`
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+            message: 'Failed to retrieve teams'
+          };
+        }
+      });
     }
 
-    console.log(`📦 Registered ${this.server.tools.size} tools`);
+    console.log(`📦 Registered ${this.server.tools!.size} basic tools`);
   }
 
   private setupRequestHandlers() {
-    // Initialize request handler
-    this.server.setRequestHandler(InitializeRequestSchema, async (request) => {
-      console.log('🔌 Handling MCP initialize request');
-      return {
-        protocolVersion: '2024-11-05',
-        capabilities: {
-          tools: {},
-        },
-        serverInfo: {
-          name: 'clickup-mcp',
-          version: '1.0.0',
-        },
-      };
-    });
-
-    // List tools handler
+    // Initialize request handler - handle as notification
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       console.log('📋 Handling list tools request...');
       const toolsMap = this.server.tools || new Map();
