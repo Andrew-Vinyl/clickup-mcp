@@ -253,27 +253,44 @@ class ClickUpMCPServer {
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control, Accept, Authorization',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Cache-Control, Accept, Authorization, Content-Type',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'X-Accel-Buffering': 'no', // Disable nginx buffering
         'Pragma': 'no-cache',
         'Expires': '0'
       });
 
-      // Send initial connection confirmation
-      res.write(': MCP Stream connected\n\n');
       console.log('✅ MCP SSE stream established');
 
-      // Send keep-alive ping every 10 seconds
+      // Send initial MCP initialization message
+      const initMessage = {
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: {
+            tools: {}
+          },
+          serverInfo: {
+            name: "clickup-mcp",
+            version: "1.0.0"
+          }
+        }
+      };
+
+      res.write(`data: ${JSON.stringify(initMessage)}\n\n`);
+
+      // Send keep-alive ping every 30 seconds
       const keepAliveInterval = setInterval(() => {
         try {
-          res.write(': ping\n\n');
+          // Send SSE comment for keep-alive
+          res.write(': keep-alive\n\n');
           console.log('💓 MCP SSE keep-alive sent');
         } catch (error) {
           console.log('❌ MCP SSE keep-alive failed, cleaning up');
           clearInterval(keepAliveInterval);
         }
-      }, 10000);
+      }, 30000);
 
       // Handle client disconnect
       req.on('close', () => {
@@ -293,7 +310,7 @@ class ClickUpMCPServer {
       });
 
       res.on('close', () => {
-        console.log('� MCP SSE connection closed by server');
+        console.log('🔌 MCP SSE connection closed by server');
         clearInterval(keepAliveInterval);
       });
     });
@@ -301,7 +318,7 @@ class ClickUpMCPServer {
     // Handle OPTIONS for MCP stream endpoint
     app.options('/mcp/stream', (req, res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cache-Control, Accept, Authorization');
       res.status(200).end();
     });
@@ -318,6 +335,81 @@ class ClickUpMCPServer {
     app.use((error: any, req: any, res: any, next: any) => {
       console.error('🚨 Express error:', error);
       res.status(500).json({ error: 'Internal server error' });
+    });
+
+    // Handle MCP messages over SSE (bidirectional)
+    app.post('/mcp/stream', express.json(), async (req, res) => {
+      console.log('📨 MCP message received over SSE transport:', req.body);
+      
+      try {
+        const message = req.body;
+        
+        // Handle different MCP message types
+        if (message.method === 'tools/list') {
+          const toolsMap = this.server.tools || new Map();
+          const tools = Array.from(toolsMap.entries()).map(([name, tool]) => ({
+            name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+          }));
+
+          const response = {
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { tools }
+          };
+
+          res.json(response);
+        } else if (message.method === 'tools/call') {
+          const { name, arguments: args } = message.params;
+          const toolHandlers = this.server.toolHandlers || new Map();
+          const handler = toolHandlers.get(name);
+          
+          if (!handler) {
+            res.json({
+              jsonrpc: "2.0",
+              id: message.id,
+              error: {
+                code: -32601,
+                message: `Tool ${name} not found`
+              }
+            });
+            return;
+          }
+
+          const result = await handler(args);
+          res.json({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { 
+              content: [{ 
+                type: 'text', 
+                text: JSON.stringify(result, null, 2) 
+              }] 
+            }
+          });
+        } else {
+          // Unknown method
+          res.json({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: {
+              code: -32601,
+              message: `Method ${message.method} not found`
+            }
+          });
+        }
+      } catch (error) {
+        console.error('❌ MCP message handling error:', error);
+        res.status(500).json({
+          jsonrpc: "2.0",
+          id: req.body.id,
+          error: {
+            code: -32603,
+            message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}`
+          }
+        });
+      }
     });
 
     // Start server with error handling
