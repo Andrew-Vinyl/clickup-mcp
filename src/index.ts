@@ -95,51 +95,34 @@ class ClickUpMCPServer {
   }
 
   private registerBasicTools() {
-    // Add basic tools that don't require ClickUp API
-    this.server.tools!.set('demo_ping', {
+    // Initialize tool storage
+    this.server.tools = new Map();
+    this.server.toolHandlers = new Map();
+
+    // Add basic demo tool
+    this.server.tools.set('demo_ping', {
       name: 'demo_ping',
       description: 'Demo ping tool - ClickUp token required for full functionality',
       inputSchema: { type: 'object', properties: {}, required: [] }
     });
     
-    this.server.toolHandlers!.set('demo_ping', async () => ({
+    this.server.toolHandlers.set('demo_ping', async () => ({
       success: true,
       message: 'Demo mode - Add CLICKUP_PERSONAL_TOKEN for full functionality',
       timestamp: new Date().toISOString()
     }));
 
-    // Add ClickUp teams tool if API is available
+    // Register all ClickUp tools if API is available
     if (this.clickup) {
-      this.server.tools!.set('clickup_get_teams', {
-        name: 'clickup_get_teams',
-        description: 'Get all teams for the authenticated user',
-        inputSchema: { type: 'object', properties: {}, required: [] }
-      });
-      
-      this.server.toolHandlers!.set('clickup_get_teams', async () => {
-        try {
-          const teams = await this.clickup!.getTeams();
-          return {
-            success: true,
-            data: teams,
-            message: `Retrieved ${teams.length} teams`
-          };
-        } catch (error) {
-          return {
-            success: false,
-            error: error instanceof Error ? error.message : 'Unknown error',
-            message: 'Failed to retrieve teams'
-          };
-        }
-      });
+      registerAllTools(this.server, this.clickup);
     }
 
-    console.log(`📦 Registered ${this.server.tools!.size} basic tools`);
+    console.log(`📦 Registered ${this.server.tools.size} tools`);
   }
 
   private setupRequestHandlers() {
-    // Initialize request handler - use string method instead of object
-    this.server.setRequestHandler('initialize', async (request) => {
+    // Initialize request handler
+    this.server.setRequestHandler(InitializeRequestSchema, async (request) => {
       console.log('🔌 Handling MCP initialize request');
       return {
         protocolVersion: '2024-11-05',
