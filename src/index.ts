@@ -138,6 +138,21 @@ class ClickUpMCPServer {
   }
 
   private setupRequestHandlers() {
+    // Initialize request handler
+    this.server.setRequestHandler({ method: 'initialize' }, async (request) => {
+      console.log('🔌 Handling MCP initialize request');
+      return {
+        protocolVersion: '2024-11-05',
+        capabilities: {
+          tools: {},
+        },
+        serverInfo: {
+          name: 'clickup-mcp',
+          version: '1.0.0',
+        },
+      };
+    });
+
     // List tools handler
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       console.log('📋 Handling list tools request...');
@@ -235,10 +250,74 @@ class ClickUpMCPServer {
       res.json({ tools, count: tools.length });
     });
 
-    // MCP endpoint (for future HTTP transport support)
+    // MCP endpoint (for HTTP transport support)
     app.post('/mcp', async (req, res) => {
-      console.log('🔌 MCP endpoint accessed');
-      res.json({ message: 'MCP HTTP endpoint ready for future implementation' });
+      console.log('🔌 MCP HTTP endpoint accessed:', req.body);
+      
+      try {
+        const message = req.body;
+        
+        // Handle different MCP message types
+        if (message.method === 'initialize') {
+          const response = {
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              protocolVersion: "2024-11-05",
+              capabilities: { tools: {} },
+              serverInfo: { name: "clickup-mcp", version: "1.0.0" }
+            }
+          };
+          res.json(response);
+        } else if (message.method === 'tools/list') {
+          const toolsMap = this.server.tools || new Map();
+          const tools = Array.from(toolsMap.entries()).map(([name, tool]) => ({
+            name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+          }));
+
+          const response = {
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { tools }
+          };
+          res.json(response);
+        } else if (message.method === 'tools/call') {
+          const { name, arguments: args } = message.params;
+          const toolHandlers = this.server.toolHandlers || new Map();
+          const handler = toolHandlers.get(name);
+          
+          if (!handler) {
+            res.json({
+              jsonrpc: "2.0",
+              id: message.id,
+              error: { code: -32601, message: `Tool ${name} not found` }
+            });
+            return;
+          }
+
+          const result = await handler(args);
+          res.json({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+          });
+        } else {
+          res.json({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: -32601, message: `Method ${message.method} not found` }
+          });
+        }
+      } catch (error) {
+        console.error('❌ MCP HTTP message handling error:', error);
+        res.status(500).json({
+          jsonrpc: "2.0",
+          id: req.body.id,
+          error: { code: -32603, message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}` }
+        });
+      }
     });
 
     // MCP Stream endpoint for SSE (mcp-remote protocol)
