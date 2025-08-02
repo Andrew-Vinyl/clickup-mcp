@@ -138,8 +138,8 @@ class ClickUpMCPServer {
   }
 
   private setupRequestHandlers() {
-    // Initialize request handler
-    this.server.setRequestHandler({ method: 'initialize' }, async (request) => {
+    // Initialize request handler - use string method instead of object
+    this.server.setRequestHandler('initialize', async (request) => {
       console.log('🔌 Handling MCP initialize request');
       return {
         protocolVersion: '2024-11-05',
