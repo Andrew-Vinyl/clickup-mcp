@@ -59,8 +59,9 @@ Should return:
 }
 ```
 
-## 🔧 Local Usage with Claude
+## 🔧 Usage with Claude
 
+### Local Usage (STDIO)
 Add to your Claude MCP settings (`~/Library/Application Support/Claude/mcp_settings.json`):
 
 ```json
@@ -69,6 +70,23 @@ Add to your Claude MCP settings (`~/Library/Application Support/Claude/mcp_setti
     "clickup": {
       "command": "npx",
       "args": ["clickup-mcp"],
+      "env": {
+        "CLICKUP_PERSONAL_TOKEN": "pk_your_token_here"
+      }
+    }
+  }
+}
+```
+
+### Remote Usage (HTTP via Railway)
+For the deployed Railway server, use:
+
+```json
+{
+  "mcpServers": {
+    "clickup": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-remote", "https://your-app.railway.app/mcp"],
       "env": {
         "CLICKUP_PERSONAL_TOKEN": "pk_your_token_here"
       }

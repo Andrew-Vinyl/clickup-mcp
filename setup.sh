@@ -61,14 +61,29 @@ if npm run test:quick; then
     echo "   - Set SERVER_MODE=http for Railway deployment"
     echo "   - Deploy!"
     echo ""
-    echo "4. 🔧 For local Claude usage:"
-    echo "   Add to your MCP settings.json:"
+    echo "4. 🔧 For Claude Desktop usage:"
+    echo "   Local (STDIO) - Add to your MCP settings.json:"
     echo '   {'
-    echo '     "clickup": {'
-    echo '       "command": "npx",'
-    echo '       "args": ["clickup-mcp"],'
-    echo '       "env": {'
-    echo '         "CLICKUP_PERSONAL_TOKEN": "your_token_here"'
+    echo '     "mcpServers": {'
+    echo '       "clickup": {'
+    echo '         "command": "npx",'
+    echo '         "args": ["clickup-mcp"],'
+    echo '         "env": {'
+    echo '           "CLICKUP_PERSONAL_TOKEN": "your_token_here"'
+    echo '         }'
+    echo '       }'
+    echo '     }'
+    echo '   }'
+    echo ""
+    echo "   Remote (HTTP) - After Railway deployment:"
+    echo '   {'
+    echo '     "mcpServers": {'
+    echo '       "clickup": {'
+    echo '         "command": "npx",'
+    echo '         "args": ["-y", "@modelcontextprotocol/server-remote", "https://your-app.railway.app/mcp"],'
+    echo '         "env": {'
+    echo '           "CLICKUP_PERSONAL_TOKEN": "your_token_here"'
+    echo '         }'
     echo '       }'
     echo '     }'
     echo '   }'

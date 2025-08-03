@@ -1,5 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import {
   CallToolRequestSchema,
   ErrorCode,
@@ -43,6 +44,7 @@ interface ExtendedServer extends Server {
 class ClickUpMCPServer {
   private server: ExtendedServer;
   private clickup: ClickUpAPI | null = null;
+  private sseTransports: Map<string, SSEServerTransport> = new Map();
 
   constructor() {
     console.log('🏗️  Constructing ClickUp MCP Server...');
@@ -188,9 +190,9 @@ class ClickUpMCPServer {
   async startHttp() {
     console.log('🚀 Starting ClickUp MCP Server in HTTP mode...');
     console.log(`🔌 Binding to port ${PORT}...`);
-    
+
     const app = express();
-    
+
     // Basic middleware
     app.use(express.json({ limit: '10mb' }));
     app.use((req, res, next) => {
@@ -215,13 +217,13 @@ class ClickUpMCPServer {
             has_token: !!CLICKUP_TOKEN
           }
         };
-        
+
         console.log('✅ Health check successful');
         res.status(200).json(healthData);
       } catch (error) {
         console.error('❌ Health check failed:', error);
-        res.status(500).json({ 
-          status: 'error', 
+        res.status(500).json({
+          status: 'error',
           error: error instanceof Error ? error.message : 'Unknown error'
         });
       }
@@ -235,163 +237,100 @@ class ClickUpMCPServer {
       res.json({ tools, count: tools.length });
     });
 
-    // MCP endpoint (for HTTP transport support)
-    app.post('/mcp', async (req, res) => {
-      console.log('🔌 MCP HTTP endpoint accessed:', req.body);
-      
+    // MCP SSE endpoint - GET request to establish SSE connection
+    app.get('/mcp', async (req, res) => {
+      console.log('🌊 MCP SSE connection request received');
+      console.log(`   User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
+      console.log(`   Accept: ${req.headers.accept || 'unknown'}`);
+
       try {
-        const message = req.body;
-        
-        // Handle different MCP message types
-        if (message.method === 'initialize') {
-          const response = {
-            jsonrpc: "2.0",
-            id: message.id,
-            result: {
-              protocolVersion: "2024-11-05",
-              capabilities: { tools: {} },
-              serverInfo: { name: "clickup-mcp", version: "1.0.0" }
-            }
-          };
-          res.json(response);
-        } else if (message.method === 'tools/list') {
-          const toolsMap = this.server.tools || new Map();
-          const tools = Array.from(toolsMap.entries()).map(([name, tool]) => ({
-            name,
-            description: tool.description,
-            inputSchema: tool.inputSchema,
-          }));
+        // Create SSE transport with POST endpoint for messages
+        const transport = new SSEServerTransport('/mcp', res);
 
-          const response = {
-            jsonrpc: "2.0",
-            id: message.id,
-            result: { tools }
-          };
-          res.json(response);
-        } else if (message.method === 'tools/call') {
-          const { name, arguments: args } = message.params;
-          const toolHandlers = this.server.toolHandlers || new Map();
-          const handler = toolHandlers.get(name);
-          
-          if (!handler) {
-            res.json({
-              jsonrpc: "2.0",
-              id: message.id,
-              error: { code: -32601, message: `Tool ${name} not found` }
-            });
-            return;
-          }
+        // Store transport for session management
+        this.sseTransports.set(transport.sessionId, transport);
 
-          const result = await handler(args);
-          res.json({
-            jsonrpc: "2.0",
-            id: message.id,
-            result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
-          });
-        } else {
-          res.json({
-            jsonrpc: "2.0",
-            id: message.id,
-            error: { code: -32601, message: `Method ${message.method} not found` }
-          });
-        }
+        // Handle transport events
+        transport.onclose = () => {
+          console.log(`👋 MCP SSE transport closed for session ${transport.sessionId}`);
+          this.sseTransports.delete(transport.sessionId);
+        };
+
+        transport.onerror = (error) => {
+          console.error(`🚨 MCP SSE transport error for session ${transport.sessionId}:`, error);
+          this.sseTransports.delete(transport.sessionId);
+        };
+
+        // Handle connection close
+        req.on('close', () => {
+          console.log(`🔌 Client disconnected for session ${transport.sessionId}`);
+          this.sseTransports.delete(transport.sessionId);
+        });
+
+        req.on('error', (error) => {
+          console.error(`🚨 Request error for session ${transport.sessionId}:`, error);
+          this.sseTransports.delete(transport.sessionId);
+        });
+
+        // Connect the MCP server to this transport
+        await this.server.connect(transport);
+
+        console.log(`✅ MCP Server connected via SSE transport, session: ${transport.sessionId}`);
+
       } catch (error) {
-        console.error('❌ MCP HTTP message handling error:', error);
+        console.error('❌ Failed to establish MCP SSE connection:', error);
         res.status(500).json({
-          jsonrpc: "2.0",
-          id: req.body.id,
-          error: { code: -32603, message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}` }
+          error: 'Failed to establish MCP connection',
+          message: error instanceof Error ? error.message : 'Unknown error'
         });
       }
     });
 
-    // MCP Stream endpoint for SSE (mcp-remote protocol)
-    app.get('/mcp/stream', (req, res) => {
-      console.log('🌊 MCP Stream endpoint accessed for SSE');
-      console.log(`   User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
-      console.log(`   Accept: ${req.headers.accept || 'unknown'}`);
-      
-      // Set proper SSE headers
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control, Accept, Authorization, Content-Type',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'X-Accel-Buffering': 'no', // Disable nginx buffering
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      });
+    // MCP POST endpoint - Handle incoming messages from SSE transport
+    app.post('/mcp', async (req, res) => {
+      console.log('📨 MCP POST message received');
+      console.log(`   Query params:`, req.query);
+      console.log(`   Body:`, req.body);
 
-      console.log('✅ MCP SSE stream established');
+      try {
+        // Get session ID from query parameters
+        const sessionId = req.query.sessionId as string;
 
-      // Send initial MCP initialization message
-      const initMessage = {
-        jsonrpc: "2.0",
-        method: "notifications/initialized",
-        params: {
-          protocolVersion: "2024-11-05",
-          capabilities: {
-            tools: {}
-          },
-          serverInfo: {
-            name: "clickup-mcp",
-            version: "1.0.0"
-          }
+        if (!sessionId) {
+          console.error('❌ No sessionId provided in POST request');
+          res.status(400).json({ error: 'sessionId required' });
+          return;
         }
-      };
 
-      res.write(`data: ${JSON.stringify(initMessage)}\n\n`);
+        // Find the SSE transport for this session
+        const transport = this.sseTransports.get(sessionId);
 
-      // Send keep-alive ping every 30 seconds
-      const keepAliveInterval = setInterval(() => {
-        try {
-          // Send SSE comment for keep-alive
-          res.write(': keep-alive\n\n');
-          console.log('💓 MCP SSE keep-alive sent');
-        } catch (error) {
-          console.log('❌ MCP SSE keep-alive failed, cleaning up');
-          clearInterval(keepAliveInterval);
+        if (!transport) {
+          console.error(`❌ No SSE transport found for session: ${sessionId}`);
+          res.status(404).json({ error: 'Session not found' });
+          return;
         }
-      }, 30000);
 
-      // Handle client disconnect
-      req.on('close', () => {
-        console.log('👋 MCP SSE client disconnected');
-        clearInterval(keepAliveInterval);
-      });
+        // Let the transport handle the message
+        await transport.handlePostMessage(req, res);
+        console.log(`✅ Message handled by SSE transport for session: ${sessionId}`);
 
-      req.on('error', (error) => {
-        console.error('🚨 MCP SSE connection error:', error);
-        clearInterval(keepAliveInterval);
-      });
-
-      // Handle response errors
-      res.on('error', (error) => {
-        console.error('🚨 MCP SSE response error:', error);
-        clearInterval(keepAliveInterval);
-      });
-
-      res.on('close', () => {
-        console.log('🔌 MCP SSE connection closed by server');
-        clearInterval(keepAliveInterval);
-      });
+      } catch (error) {
+        console.error('❌ MCP POST message handling error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            error: 'Failed to handle MCP message',
+            message: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
+      }
     });
 
-    // Handle OPTIONS for MCP stream endpoint
-    app.options('/mcp/stream', (req, res) => {
+    // Handle OPTIONS for MCP endpoint
+    app.options('/mcp', (req, res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cache-Control, Accept, Authorization');
-      res.status(200).end();
-    });
-
-    // Handle SSE preflight requests
-    app.options('/', (req, res) => {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cache-Control, Accept');
       res.status(200).end();
     });
 
@@ -401,80 +340,7 @@ class ClickUpMCPServer {
       res.status(500).json({ error: 'Internal server error' });
     });
 
-    // Handle MCP messages over SSE (bidirectional)
-    app.post('/mcp/stream', express.json(), async (req, res) => {
-      console.log('📨 MCP message received over SSE transport:', req.body);
-      
-      try {
-        const message = req.body;
-        
-        // Handle different MCP message types
-        if (message.method === 'tools/list') {
-          const toolsMap = this.server.tools || new Map();
-          const tools = Array.from(toolsMap.entries()).map(([name, tool]) => ({
-            name,
-            description: tool.description,
-            inputSchema: tool.inputSchema,
-          }));
 
-          const response = {
-            jsonrpc: "2.0",
-            id: message.id,
-            result: { tools }
-          };
-
-          res.json(response);
-        } else if (message.method === 'tools/call') {
-          const { name, arguments: args } = message.params;
-          const toolHandlers = this.server.toolHandlers || new Map();
-          const handler = toolHandlers.get(name);
-          
-          if (!handler) {
-            res.json({
-              jsonrpc: "2.0",
-              id: message.id,
-              error: {
-                code: -32601,
-                message: `Tool ${name} not found`
-              }
-            });
-            return;
-          }
-
-          const result = await handler(args);
-          res.json({
-            jsonrpc: "2.0",
-            id: message.id,
-            result: { 
-              content: [{ 
-                type: 'text', 
-                text: JSON.stringify(result, null, 2) 
-              }] 
-            }
-          });
-        } else {
-          // Unknown method
-          res.json({
-            jsonrpc: "2.0",
-            id: message.id,
-            error: {
-              code: -32601,
-              message: `Method ${message.method} not found`
-            }
-          });
-        }
-      } catch (error) {
-        console.error('❌ MCP message handling error:', error);
-        res.status(500).json({
-          jsonrpc: "2.0",
-          id: req.body.id,
-          error: {
-            code: -32603,
-            message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }
-        });
-      }
-    });
 
     // Start server with error handling
     try {

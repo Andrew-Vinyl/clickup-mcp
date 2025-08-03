@@ -51,15 +51,35 @@ docker run -p 3000:3000 --env-file .env clickup-mcp
 
 ## 🎯 Usage with Claude
 
+### Local Usage (STDIO)
 Add to your MCP settings:
 
 ```json
 {
-  "clickup": {
-    "command": "npx",
-    "args": ["clickup-mcp"],
-    "env": {
-      "CLICKUP_PERSONAL_TOKEN": "your_token_here"
+  "mcpServers": {
+    "clickup": {
+      "command": "npx",
+      "args": ["clickup-mcp"],
+      "env": {
+        "CLICKUP_PERSONAL_TOKEN": "your_token_here"
+      }
+    }
+  }
+}
+```
+
+### Remote Usage (HTTP via Railway)
+For remote deployment, use:
+
+```json
+{
+  "mcpServers": {
+    "clickup": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-remote", "https://your-app.railway.app/mcp"],
+      "env": {
+        "CLICKUP_PERSONAL_TOKEN": "your_token_here"
+      }
     }
   }
 }
